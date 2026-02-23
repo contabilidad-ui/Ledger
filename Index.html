@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ledger Suite — Control Corporativo On-Chain</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬡</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>
+    :root {
+      --bg-900: #07070f;
+      --bg-800: #0d0a1a;
+      --bg-700: #15102a;
+      --card: rgba(12, 11, 24, 0.72);
+      --card-border: rgba(109, 60, 214, 0.22);
+      --text-100: #edf0ff;
+      --text-200: #c9c3ef;
+      --text-400: #8a83b5;
+      --purple-500: #8b5cf6;
+      --purple-600: #7c3aed;
+      --blue-500: #284b96;
+      --blue-400: #3c6ac7;
+      --focus: rgba(60, 106, 199, 0.45);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif; background: var(--bg-900); color: var(--text-100); }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(41%) sepia(21%) saturate(1364%) hue-rotate(188deg) brightness(90%) contrast(95%); opacity: 0.9; cursor: pointer; }
+    select option { background: #141126; color: #d6cff6; }
+    input, select, button { font-family: inherit; }
+    input:focus, select:focus { border-color: var(--blue-400) !important; box-shadow: 0 0 0 3px var(--focus); }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: linear-gradient(var(--purple-500), var(--blue-500)); border-radius: 3px; }
+    code { font-size: 11px; font-family: 'IBM Plex Mono', monospace; }
+    @media (max-width: 1024px) {
+      [style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+      [style*="grid-template-columns: 1fr 2fr auto"] { grid-template-columns: 1fr !important; }
+      [style*="repeat(4, 1fr)"] { grid-template-columns: 1fr 1fr !important; }
+      header > div, nav > div, main { padding-left: 16px !important; padding-right: 16px !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ═══════════════════════════════════════════════════════════════════════
+    const APPS_SCRIPT_URL = "https://script.google.com/a/macros/reental.co/s/AKfycby8ityRi90YVQf8gzqNxKQtgRZYtL94ioqAO5g0zRtXtee9U7PvWIP8KIz-wDpADKiEUA/exec";
+
+    const api = {
+      async get(action, params = {}) {
+        const query = new URLSearchParams({ action, ...params }).toString();
+        const res = await fetch(APPS_SCRIPT_URL + "?" + query);
+        return res.json();
+      },
+      async post(body) {
+        const res = await fetch(APPS_SCRIPT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify(body),
+        });
+        return res.json();
+      },
+    };
+
+    const genId = () => Math.random().toString(36).substr(2, 9);
+    const fmtDate = (d) => d.toISOString().split("T")[0];
+    const today = fmtDate(new Date());
+    const ago30 = fmtDate(new Date(Date.now() - 30 * 86400000));
+    const truncAddr = (a) => (a && a.length > 10 ? a.slice(0, 6) + "···" + a.slice(-4) : a || "");
+    const downloadCSV = (csv, filename) => {
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    // ─── SVG Icons ───
+    const I = ({ t, s = 18 }) => {
+      const p = { width: s, height: s, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" };
+      const m = {
+        wallet: <svg {...p}><path d="M21 12V7H5a2 2 0 010-4h14v4"/><path d="M3 5v14a2 2 0 002 2h16v-5"/><path d="M18 12a2 2 0 100 4 2 2 0 000-4z"/></svg>,
+        token: <svg {...p}><circle cx="12" cy="12" r="10"/><path d="M12 6v12M6 12h12"/></svg>,
+        download: <svg {...p}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+        balance: <svg {...p}><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M2 9h20M9 21V9"/></svg>,
+        template: <svg {...p}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>,
+        profile: <svg {...p}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+        plus: <svg {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+        trash: <svg {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>,
+        check: <svg {...p}><polyline points="20 6 9 17 4 12"/></svg>,
+        x: <svg {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+        copy: <svg {...p}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>,
+        polygon: <svg {...p}><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/></svg>,
+        filter: <svg {...p}><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
+        calendar: <svg {...p}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
+        chevDown: <svg {...p}><polyline points="6 9 12 15 18 9"/></svg>,
+        edit: <svg {...p}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+        shield: <svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+        info: <svg {...p}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>,
+        verified: <svg {...p}><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
+        alert: <svg {...p}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+        refresh: <svg {...p}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>,
+      };
+      return m[t] || null;
+    };
+
+    const Badge = ({ children, c = "purple" }) => {
+      const cs = {
+        purple: { bg: "rgba(139,92,246,0.15)", fg: "#a78bfa", bd: "rgba(139,92,246,0.3)" },
+        green: { bg: "rgba(16,185,129,0.15)", fg: "#6ee7b7", bd: "rgba(16,185,129,0.3)" },
+        blue: { bg: "rgba(59,130,246,0.15)", fg: "#93c5fd", bd: "rgba(59,130,246,0.3)" },
+        amber: { bg: "rgba(245,158,11,0.15)", fg: "#fcd34d", bd: "rgba(245,158,11,0.3)" },
+        red: { bg: "rgba(239,68,68,0.15)", fg: "#fca5a5", bd: "rgba(239,68,68,0.3)" },
+      };
+      const v = cs[c] || cs.purple;
+      return <span style={{ background: v.bg, color: v.fg, border: "1px solid " + v.bd, padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, letterSpacing: 0.5, whiteSpace: "nowrap" }}>{children}</span>;
+    };
+
+    const S = {
+      card: { background: "var(--card)", border: "1px solid var(--card-border)", borderRadius: 18, padding: "22px 24px", backdropFilter: "blur(14px)" },
+      cardH: { fontSize: 13, fontWeight: 800, color: "#bbb4e8", display: "flex", alignItems: "center", gap: 8, letterSpacing: 0.25 },
+      label: { display: "flex", flexDirection: "column", gap: 6, fontSize: 11, color: "var(--text-400)", fontWeight: 700, letterSpacing: 0.2 },
+      input: { background: "rgba(108,82,173,0.1)", border: "1px solid rgba(115,84,196,0.25)", borderRadius: 12, padding: "11px 14px", color: "var(--text-100)", fontSize: 13, outline: "none", fontFamily: "inherit", width: "100%", transition: "border-color 0.2s, box-shadow 0.2s" },
+      btn: { background: "linear-gradient(135deg, var(--purple-600), var(--blue-500))", color: "#fff", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "11px 24px", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", letterSpacing: 0.2, boxShadow: "0 8px 20px rgba(32,17,69,0.45)", transition: "all 0.2s" },
+      iconBtn: { background: "rgba(91,70,146,0.16)", border: "1px solid rgba(114,89,182,0.25)", borderRadius: 10, padding: 7, cursor: "pointer", color: "#beb2f5", display: "flex", alignItems: "center", justifyContent: "center" },
+      mini: { background: "rgba(106,77,173,0.16)", border: "1px solid rgba(121,92,196,0.24)", borderRadius: 8, padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#a195d3", cursor: "pointer", fontFamily: "inherit" },
+    };
+
+    const Spinner = ({ size = 14 }) => (
+      <span style={{ width: size, height: size, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />
+    );
+
+    const CheckList = ({ items, selected, toggle, labelKey = "name", addrKey = "address", showAddr = true }) => (
+      <div style={{ maxHeight: 200, overflowY: "auto", scrollbarWidth: "thin" }}>
+        {items.map(it => (
+          <label key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, cursor: "pointer", marginBottom: 2, background: selected.includes(it.id) ? "rgba(139,92,246,0.08)" : "transparent" }}>
+            <input type="checkbox" checked={selected.includes(it.id)} onChange={() => toggle(it.id)} style={{ accentColor: "#8b5cf6", width: 15, height: 15 }} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#c4b5fd" }}>{it[labelKey]}</div>
+              {showAddr && <div style={{ fontSize: 10, color: "#6b5f8a", fontFamily: "monospace" }}>{it[addrKey] === "native" ? "Nativo (POL)" : truncAddr(it[addrKey])}</div>}
+            </div>
+          </label>
+        ))}
+        {items.length === 0 && <div style={{ fontSize: 12, color: "#6b5f8a", padding: 10, fontStyle: "italic" }}>Ningún elemento registrado</div>}
+      </div>
+    );
+
+    // ═══════════════════════════════════════════════════════════════════════
+    function App() {
+      const [tab, setTab] = useState("movements");
+      const [wallets, setWallets] = useState([]);
+      const [tokens, setTokens] = useState([]);
+      const [providers, setProviders] = useState([]);
+      const [templates, setTemplates] = useState([]);
+      const [profiles, setProfiles] = useState([]);
+      const [activeProfile, setActiveProfile] = useState("default");
+      const [showProfileDD, setShowProfileDD] = useState(false);
+      const [note, setNote] = useState(null);
+      const [backendOk, setBackendOk] = useState(null);
+
+      const [nw, setNw] = useState({ name: "", address: "" });
+      const [nt, setNt] = useState({ name: "", address: "" });
+      const [np, setNp] = useState({ name: "", address: "" });
+      const [editW, setEditW] = useState(null);
+      const [editP, setEditP] = useState(null);
+
+      const [mFrom, setMFrom] = useState(ago30);
+      const [mTo, setMTo] = useState(today);
+      const [mWallets, setMWallets] = useState([]);
+      const [mTokens, setMTokens] = useState([]);
+      const [mTemplate, setMTemplate] = useState("");
+      const [mExcZero, setMExcZero] = useState(true);
+      const [mSearchType, setMSearchType] = useState("all");
+      const [mLoading, setMLoading] = useState(false);
+      const [mProgress, setMProgress] = useState("");
+      const [mStats, setMStats] = useState(null);
+
+      const [bDate, setBDate] = useState(today);
+      const [bBlock, setBBlock] = useState("");
+      const [bWallets, setBWallets] = useState([]);
+      const [bTokens, setBTokens] = useState([]);
+      const [bLoading, setBLoading] = useState(false);
+      const [bStats, setBStats] = useState(null);
+
+      const notify = useCallback((msg, type = "success") => {
+        setNote({ msg, type });
+        setTimeout(() => setNote(null), 4000);
+      }, []);
+
+      const loadData = useCallback(async () => {
+        try {
+          const [wRes, tRes, pvRes, tmRes, pRes] = await Promise.all([
+            api.get("get_wallets", { profile_id: activeProfile }),
+            api.get("get_tokens", { profile_id: activeProfile }),
+            api.get("get_providers", { profile_id: activeProfile }),
+            api.get("get_templates"),
+            api.get("get_profiles"),
+          ]);
+          if (wRes.success) setWallets(wRes.data);
+          if (tRes.success) setTokens(tRes.data);
+          if (pvRes.success) setProviders(pvRes.data);
+          if (tmRes.success) {
+            setTemplates(tmRes.data);
+            if (tmRes.data.length > 0 && !mTemplate) setMTemplate(tmRes.data[0].id);
+          }
+          if (pRes.success) setProfiles(pRes.data);
+          setBackendOk(true);
+          notify("Conectado al backend correctamente", "success");
+        } catch (e) {
+          console.error("Backend error:", e);
+          setBackendOk(false);
+          setWallets([
+            { id: "w1", name: "Tesorería Principal", address: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD28" },
+            { id: "w2", name: "Proyecto Madrid Centro", address: "0x8Ba1f109551bD432803012645Ac136ddd64DBA72" },
+            { id: "w3", name: "Pagos Rendimientos Q1", address: "0xdD2FD4581271e230360230F9337D5c0430Bf44C0" },
+          ]);
+          setTokens([
+            { id: "t1", name: "RNT", address: "0x1234567890abcdef1234567890abcdef12345678" },
+            { id: "t2", name: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" },
+            { id: "t3", name: "USDT", address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F" },
+            { id: "t4", name: "POL (Native)", address: "native" },
+          ]);
+          setProviders([
+            { id: "p1", name: "Proveedor Madrid", address: "0x0D8775F648430679A709E98d2b0Cb6250d2887EF" },
+          ]);
+          setTemplates([
+            { id: "tp1", name: "Completo", columns: ["date","datetime_utc","hash","from","from_name","to","to_name","token_symbol","token_address","amount","signed_value","direction","decimals","value_usd","tx_type","mov_type","detalle","detalle_holded","block_number","gas_used","gas_price_gwei","method","log_index","source"] },
+            { id: "tp2", name: "Rendimientos", columns: ["date","datetime_utc","to","to_name","token_symbol","token_address","amount","signed_value","mov_type","detalle","detalle_holded","value_usd"] },
+            { id: "tp3", name: "Inter-wallet", columns: ["date","datetime_utc","hash","from","from_name","to","to_name","token_symbol","amount","signed_value","mov_type","detalle","detalle_holded"] },
+            { id: "tp4", name: "Contabilidad", columns: ["date","datetime_utc","hash","from","from_name","to","to_name","token_symbol","token_address","signed_value","mov_type","detalle","detalle_holded","value_usd","block_number"] },
+            { id: "tp5", name: "Entradas/Salidas", columns: ["date","datetime_utc","mov_type","detalle","detalle_holded","token_symbol","signed_value","from","from_name","to","to_name","hash"] },
+            { id: "tp7", name: "Carga Holded", columns: ["date","detalle_holded","signed_value"] },
+            { id: "tp8", name: "Holded con Detalle", columns: ["date","detalle_holded","signed_value","mov_type","detalle"] },
+          ]);
+          setProfiles([{ id: "default", name: "Rentaltoken Principal" }]);
+          if (!mTemplate) setMTemplate("tp1");
+        }
+      }, [activeProfile]);
+
+      useEffect(() => { loadData(); }, [loadData]);
+
+      const addWallet = async () => {
+        if (!nw.name || !nw.address) return notify("Completa nombre y dirección", "error");
+        if (!/^0x[a-fA-F0-9]{40}$/.test(nw.address)) return notify("Dirección inválida (0x + 40 hex)", "error");
+        if (wallets.find(w => w.address.toLowerCase() === nw.address.toLowerCase())) return notify("Wallet ya existe", "error");
+        if (backendOk) {
+          const res = await api.post({ action: "add_wallet", name: nw.name, address: nw.address, profile_id: activeProfile });
+          if (res.success) { setWallets([...wallets, { id: res.id, name: nw.name, address: nw.address }]); setNw({ name: "", address: "" }); notify("Wallet guardada en Google Sheets"); }
+          else notify("Error: " + res.error, "error");
+        } else { setWallets([...wallets, { id: genId(), name: nw.name, address: nw.address }]); setNw({ name: "", address: "" }); notify("Wallet agregada (modo local)"); }
+      };
+
+      const removeWallet = async (id) => {
+        if (backendOk) await api.post({ action: "delete_wallet", id });
+        setWallets(wallets.filter(w => w.id !== id));
+        setMWallets(mWallets.filter(x => x !== id));
+        setBWallets(bWallets.filter(x => x !== id));
+        notify("Wallet eliminada");
+      };
+
+      const saveEditW = async () => {
+        if (!editW) return;
+        if (backendOk) await api.post({ action: "update_wallet", id: editW.id, name: editW.name, address: editW.address });
+        setWallets(wallets.map(w => w.id === editW.id ? editW : w));
+        setEditW(null);
+        notify("Wallet actualizada");
+      };
+
+      const addToken = async () => {
+        if (!nt.name || !nt.address) return notify("Completa nombre y dirección del token", "error");
+        if (nt.address !== "native" && !/^0x[a-fA-F0-9]{40}$/.test(nt.address)) return notify("Token address inválido", "error");
+        if (tokens.find(t => t.address.toLowerCase() === nt.address.toLowerCase())) return notify("Token ya existe", "error");
+        if (backendOk) {
+          const res = await api.post({ action: "add_token", name: nt.name, address: nt.address, profile_id: activeProfile });
+          if (res.success) { setTokens([...tokens, { id: res.id, name: nt.name, address: nt.address }]); setNt({ name: "", address: "" }); notify("Token guardado en Google Sheets"); }
+        } else { setTokens([...tokens, { id: genId(), name: nt.name, address: nt.address }]); setNt({ name: "", address: "" }); notify("Token agregado (modo local)"); }
+      };
+
+      const removeToken = async (id) => {
+        if (backendOk) await api.post({ action: "delete_token", id });
+        setTokens(tokens.filter(t => t.id !== id));
+        setMTokens(mTokens.filter(x => x !== id));
+        setBTokens(bTokens.filter(x => x !== id));
+        notify("Token eliminado");
+      };
+
+      const addProvider = async () => {
+        if (!np.name || !np.address) return notify("Completa nombre y dirección del proveedor", "error");
+        if (!/^0x[a-fA-F0-9]{40}$/.test(np.address)) return notify("Dirección inválida (0x + 40 hex)", "error");
+        if (providers.find(p => p.address.toLowerCase() === np.address.toLowerCase())) return notify("Proveedor ya existe", "error");
+        if (backendOk) {
+          const res = await api.post({ action: "add_provider", name: np.name, address: np.address, profile_id: activeProfile });
+          if (res.success) {
+            setProviders([...providers, { id: res.id, name: np.name, address: np.address }]);
+            setNp({ name: "", address: "" });
+            notify("Proveedor guardado en Google Sheets");
+          }
+        } else {
+          setProviders([...providers, { id: genId(), name: np.name, address: np.address }]);
+          setNp({ name: "", address: "" });
+          notify("Proveedor agregado (modo local)");
+        }
+      };
+
+      const removeProvider = async (id) => {
+        if (backendOk) await api.post({ action: "delete_provider", id });
+        setProviders(providers.filter(p => p.id !== id));
+        notify("Proveedor eliminado");
+      };
+
+      const saveEditP = async () => {
+        if (!editP) return;
+        if (backendOk) await api.post({ action: "update_provider", id: editP.id, name: editP.name, address: editP.address });
+        setProviders(providers.map(p => p.id === editP.id ? editP : p));
+        setEditP(null);
+        notify("Proveedor actualizado");
+      };
+
+      const tog = (id, sel, set) => set(sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id]);
+
+      const handleDownloadMov = async () => {
+        if (mWallets.length === 0) return notify("Selecciona al menos una wallet", "error");
+        if (mTokens.length === 0) return notify("Selecciona al menos un token", "error");
+        setMLoading(true); setMProgress("Conectando con Moralis..."); setMStats(null);
+        const selW = wallets.filter(w => mWallets.includes(w.id)).map(w => ({ name: w.name, address: w.address }));
+        const selT = tokens.filter(t => mTokens.includes(t.id)).map(t => ({ name: t.name, address: t.address }));
+        const tmpl = templates.find(t => t.id === mTemplate);
+        const cols = tmpl ? (Array.isArray(tmpl.columns) ? tmpl.columns : JSON.parse(tmpl.columns)) : ["datetime_utc","hash","from","to","token_symbol","amount","tx_type","block_number"];
+        if (backendOk) {
+          try {
+            setMProgress("Fase 1: Extrayendo desde Moralis...");
+            const progressTimer = setInterval(() => {
+              setMProgress(prev => {
+                if (prev.includes("Moralis") && !prev.includes("Etherscan")) return "Fase 2: Verificando con Etherscan...";
+                if (prev.includes("Etherscan")) return "Fase 3: Procesando y generando CSV...";
+                return prev;
+              });
+            }, 8000);
+            const res = await api.post({ action: "download_movements", wallets: selW, tokens: selT, profile_id: activeProfile, from_date: mFrom, to_date: mTo, exclude_zero: mExcZero, search_type: mSearchType, template_columns: cols });
+            clearInterval(progressTimer);
+            if (res.success) { downloadCSV(res.csv, res.filename); setMStats(res.stats); setMProgress(""); notify("✅ " + res.stats.total_filtered + " movimientos descargados (Moralis: " + res.stats.moralis_count + " + Etherscan: +" + res.stats.etherscan_added + ")"); }
+            else { notify("Error: " + res.error, "error"); setMProgress(""); }
+          } catch (e) { notify("Error de conexión: " + e.message, "error"); setMProgress(""); }
+        } else {
+          setMProgress("Demo: Simulando extracción...");
+          await new Promise(r => setTimeout(r, 2000));
+          setMStats({ moralis_count: 847, etherscan_added: 12, total_filtered: 734, wallets_processed: selW.length });
+          setMProgress(""); notify("Demo: CSV simulado (conecta el backend para datos reales)");
+        }
+        setMLoading(false);
+      };
+
+      const handleDownloadBal = async () => {
+        if (bWallets.length === 0) return notify("Selecciona al menos una wallet", "error");
+        if (bTokens.length === 0) return notify("Selecciona al menos un token", "error");
+        setBLoading(true); setBStats(null);
+        const selW = wallets.filter(w => bWallets.includes(w.id)).map(w => ({ name: w.name, address: w.address }));
+        const selT = tokens.filter(t => bTokens.includes(t.id)).map(t => ({ name: t.name, address: t.address }));
+        if (backendOk) {
+          try {
+            const res = await api.post({ action: "download_balances", wallets: selW, tokens: selT, date: bDate, block: bBlock || null, template_columns: ["wallet_name","wallet_address","token_symbol","token_address","balance","decimals","block_number","datetime_utc"] });
+            if (res.success) { downloadCSV(res.csv, res.filename); setBStats(res.stats); notify("✅ Saldos de " + res.stats.total_queries + " combinaciones descargados"); }
+            else notify("Error: " + res.error, "error");
+          } catch (e) { notify("Error: " + e.message, "error"); }
+        } else {
+          await new Promise(r => setTimeout(r, 1500));
+          setBStats({ total_queries: selW.length * selT.length, block_number: bBlock || "latest" });
+          notify("Demo: Saldos simulados");
+        }
+        setBLoading(false);
+      };
+
+      const tabs = [
+        { id: "movements", label: "Movimientos", icon: "download" },
+        { id: "balances", label: "Saldos", icon: "balance" },
+        { id: "wallets", label: "Wallets", icon: "wallet" },
+        { id: "providers", label: "Proveedores", icon: "profile" },
+        { id: "tokens", label: "Tokens", icon: "token" },
+        { id: "templates", label: "Templates", icon: "template" },
+        { id: "profiles", label: "Perfiles", icon: "profile" },
+      ];
+
+      const searchTypes = [
+        { id: "all", label: "Todas" },
+        { id: "interwallet", label: "Interwallet" },
+        { id: "external_in", label: "Entrada Externa" },
+        { id: "external_out", label: "Salida Externa" },
+      ];
+
+      return (
+        <div style={{ minHeight: "100vh", background: "radial-gradient(1200px 500px at 85% -10%, rgba(41,75,149,0.24), transparent 60%), radial-gradient(900px 450px at -10% 120%, rgba(139,92,246,0.2), transparent 65%), linear-gradient(155deg, var(--bg-900) 0%, var(--bg-800) 38%, var(--bg-700) 72%, #09080f 100%)", color: "var(--text-100)", fontFamily: "'Manrope', 'Segoe UI', system-ui, sans-serif", position: "relative" }}>
+          <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0 }}>
+            <div style={{ position: "absolute", top: -200, right: -150, width: 560, height: 560, background: "radial-gradient(circle, rgba(139,92,246,0.1) 0%, transparent 70%)", borderRadius: "50%" }} />
+            <div style={{ position: "absolute", bottom: -280, left: -160, width: 680, height: 680, background: "radial-gradient(circle, rgba(40,75,150,0.12) 0%, transparent 72%)", borderRadius: "50%" }} />
+          </div>
+
+          {note && <div style={{ position: "fixed", top: 20, right: 20, zIndex: 9999, maxWidth: 440, background: note.type === "error" ? "rgba(239,68,68,0.9)" : "rgba(16,185,129,0.9)", color: "#fff", padding: "12px 22px", borderRadius: 12, fontSize: 13, fontWeight: 600, backdropFilter: "blur(12px)", boxShadow: "0 8px 32px rgba(0,0,0,0.3)", animation: "slideIn 0.3s ease-out" }}>{note.msg}</div>}
+
+          <header style={{ position: "relative", zIndex: 10, borderBottom: "1px solid rgba(108,82,175,0.25)", background: "rgba(8,8,15,0.7)", backdropFilter: "blur(20px)" }}>
+            <div style={{ maxWidth: 1320, margin: "0 auto", padding: "14px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 300 }}>
+                <img src="ReentalHWhite.png" alt="Reental" style={{ height: 44, width: "auto", objectFit: "contain" }} />
+                <div>
+                  <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: 0.15, background: "linear-gradient(90deg, #d0bbff, #9d9cf8, #4a73bb)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Ledger Suite</h1>
+                  <span style={{ fontSize: 11, color: "var(--text-400)", fontWeight: 600, letterSpacing: 0.25 }}>Control corporativo de movimientos on-chain · Moralis + Etherscan</span>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                {backendOk === true && <Badge c="green">● Backend OK</Badge>}
+                {backendOk === false && <Badge c="amber">⚠ Modo Demo</Badge>}
+                <Badge c="green">● Polygon Mainnet</Badge>
+                <Badge c="purple">{wallets.length} wallets</Badge>
+              </div>
+            </div>
+          </header>
+
+          <nav style={{ position: "relative", zIndex: 10, background: "rgba(8,8,15,0.52)", backdropFilter: "blur(10px)", borderBottom: "1px solid rgba(108,82,175,0.2)" }}>
+            <div style={{ maxWidth: 1320, margin: "0 auto", padding: "0 32px", display: "flex", gap: 2, overflowX: "auto" }}>
+              {tabs.map(t => (
+                <button key={t.id} onClick={() => setTab(t.id)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 20px", border: "none", cursor: "pointer", background: tab === t.id ? "rgba(106,74,177,0.2)" : "transparent", borderBottom: tab === t.id ? "2px solid #4a73bb" : "2px solid transparent", color: tab === t.id ? "#d0bbff" : "#8a83b5", fontSize: 13, fontWeight: 700, fontFamily: "inherit", whiteSpace: "nowrap" }}><I t={t.icon} s={16} />{t.label}</button>
+              ))}
+            </div>
+          </nav>
+
+          <main style={{ position: "relative", zIndex: 10, maxWidth: 1320, margin: "0 auto", padding: "32px 32px 36px" }}>
+
+            {/* ═══ MOVEMENTS ═══ */}
+            {tab === "movements" && (
+              <div style={{ animation: "fadeIn 0.3s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+                  <I t="download" s={24} />
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#e8e4f5" }}>Descargar Movimientos</h2>
+                    <p style={{ margin: 0, fontSize: 13, color: "#7c73a8" }}>Moralis (primaria) + Etherscan (verificación) · UTC</p>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+                  <div style={S.card}>
+                    <div style={S.cardH}><I t="calendar" s={15} /> Rango de fechas (UTC)</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+                      <label style={S.label}>Desde<input type="date" value={mFrom} onChange={e => setMFrom(e.target.value)} style={S.input} /></label>
+                      <label style={S.label}>Hasta<input type="date" value={mTo} onChange={e => setMTo(e.target.value)} style={S.input} /></label>
+                    </div>
+                  </div>
+                  <div style={S.card}>
+                    <div style={S.cardH}><I t="filter" s={15} /> Opciones de filtrado</div>
+                    <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                        <input type="checkbox" checked={mExcZero} onChange={e => setMExcZero(e.target.checked)} style={{ accentColor: "#8b5cf6", width: 16, height: 16 }} />
+                        <span style={{ fontSize: 13, color: "#c4b5fd" }}>Excluir tokens con valor cero</span>
+                      </label>
+                      <div>
+                        <div style={{ fontSize: 11, color: "#7c73a8", marginBottom: 6, fontWeight: 600 }}>Tipo de búsqueda</div>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {searchTypes.map(st => (
+                            <button key={st.id} onClick={() => setMSearchType(st.id)} style={{ padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit", background: mSearchType === st.id ? "rgba(139,92,246,0.25)" : "rgba(139,92,246,0.05)", color: mSearchType === st.id ? "#c084fc" : "#7c73a8", outline: mSearchType === st.id ? "1px solid rgba(139,92,246,0.4)" : "none" }}>{st.label}</button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+                  <div style={S.card}>
+                    <div style={{ ...S.cardH, justifyContent: "space-between" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}><I t="wallet" s={15} /> Wallets</span>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setMWallets(wallets.map(w => w.id))} style={S.mini}>Todas</button>
+                        <button onClick={() => setMWallets([])} style={S.mini}>Ninguna</button>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12 }}><CheckList items={wallets} selected={mWallets} toggle={id => tog(id, mWallets, setMWallets)} /></div>
+                  </div>
+                  <div style={S.card}>
+                    <div style={{ ...S.cardH, justifyContent: "space-between" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}><I t="token" s={15} /> Tokens (por address)</span>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => setMTokens(tokens.map(t => t.id))} style={S.mini}>Todos</button>
+                        <button onClick={() => setMTokens([])} style={S.mini}>Ninguno</button>
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12 }}><CheckList items={tokens} selected={mTokens} toggle={id => tog(id, mTokens, setMTokens)} /></div>
+                  </div>
+                </div>
+                <div style={S.card}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: "#7c73a8", fontWeight: 600, marginBottom: 6 }}>Template CSV</div>
+                        <select value={mTemplate} onChange={e => setMTemplate(e.target.value)} style={{ ...S.input, width: 220, appearance: "none" }}>
+                          {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      </div>
+                      <div style={{ marginTop: 18 }}>
+                        <Badge c="blue">{(() => { const t = templates.find(x => x.id === mTemplate); return t ? (Array.isArray(t.columns) ? t.columns.length : 0) : 0; })()} columnas</Badge>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <div style={{ fontSize: 12, color: "#6b5f8a", textAlign: "right" }}>
+                        {mWallets.length} wallets · {mTokens.length} tokens<br />
+                        <span style={{ fontSize: 11 }}>{mSearchType === "all" ? "Todas las transacciones" : searchTypes.find(s => s.id === mSearchType)?.label}</span>
+                      </div>
+                      <button onClick={handleDownloadMov} disabled={mLoading} style={{ ...S.btn, opacity: mLoading ? 0.7 : 1, cursor: mLoading ? "wait" : "pointer", minWidth: 200 }}>
+                        {mLoading ? <span style={{ display: "flex", alignItems: "center", gap: 8 }}><Spinner /> Procesando...</span> : <span style={{ display: "flex", alignItems: "center", gap: 8 }}><I t="download" s={16} /> Descargar CSV</span>}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                {mProgress && <div style={{ marginTop: 12, padding: "12px 20px", borderRadius: 12, background: "rgba(139,92,246,0.06)", border: "1px solid rgba(139,92,246,0.12)", display: "flex", alignItems: "center", gap: 10 }}><Spinner /><span style={{ fontSize: 13, color: "#a78bfa", fontWeight: 600 }}>{mProgress}</span></div>}
+                {mStats && (
+                  <div style={{ marginTop: 12, padding: "16px 20px", borderRadius: 12, background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}><I t="verified" s={18} /><span style={{ fontSize: 14, fontWeight: 700, color: "#6ee7b7" }}>Extracción completada con doble verificación</span></div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 14 }}>
+                      {[{ label: "Moralis", value: mStats.moralis_count, color: "#a78bfa" }, { label: "Etherscan añadió", value: "+" + mStats.etherscan_added, color: mStats.etherscan_added > 0 ? "#fcd34d" : "#6ee7b7" }, { label: "Total filas CSV", value: mStats.total_filtered, color: "#60a5fa" }, { label: "Wallets", value: mStats.wallets_processed, color: "#c084fc" }].map((s, i) => (
+                        <div key={i} style={{ textAlign: "center" }}><div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div><div style={{ fontSize: 11, color: "#7c73a8" }}>{s.label}</div></div>
+                      ))}
+                    </div>
+                    <div style={{ padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 10, border: "1px solid rgba(139,92,246,0.08)" }}>
+                      <div style={{ fontSize: 11, color: "#7c73a8", fontWeight: 600, marginBottom: 6 }}>Leyenda mov_type en el CSV:</div>
+                      <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                        {[{ label: "Entrada Externa", color: "#6ee7b7", desc: "from externo → to nuestro · signed_value positivo" }, { label: "Salida Externa", color: "#fca5a5", desc: "from nuestro → to externo · signed_value negativo" }, { label: "Interwallet", color: "#93c5fd", desc: "from nuestro → to nuestro · signed_value sin signo" }].map((mt, i) => (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: mt.color, display: "inline-block", flexShrink: 0 }} /><span style={{ fontSize: 11, color: mt.color, fontWeight: 600 }}>{mt.label}</span><span style={{ fontSize: 10, color: "#6b5f8a" }}>— {mt.desc}</span></div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: 16, padding: "14px 20px", borderRadius: 12, background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.12)", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <I t="info" s={16} />
+                  <div style={{ fontSize: 12, color: "#7c9cc4", lineHeight: 1.7 }}><strong>Proceso:</strong> Fase 1 → Moralis extrae todas las tx. Fase 2 → Etherscan verifica y añade faltantes. Fase 3 → Deduplicación, clasificación y CSV con punto decimal. UTC.</div>
+                </div>
+                <div style={{ marginTop: 10, padding: "14px 20px", borderRadius: 12, background: "rgba(139,92,246,0.05)", border: "1px solid rgba(139,92,246,0.12)", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <I t="info" s={16} />
+                  <div style={{ fontSize: 12, color: "#b0a0d4", lineHeight: 1.7 }}>
+                    <strong>Campos especiales:</strong><br />
+                    <strong style={{ color: "#c084fc" }}>signed_value</strong> — Positivo para entradas, negativo (−) para salidas, sin signo para interwallet.<br />
+                    <strong style={{ color: "#c084fc" }}>direction</strong> — Solo IN (entrada) o OUT (salida).<br />
+                    <strong style={{ color: "#c084fc" }}>mov_type</strong> — <em>Entrada Externa</em>, <em>Salida Externa</em>, <em>Interwallet</em>. Movimientos sin wallets del perfil se descartan.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ BALANCES ═══ */}
+            {tab === "balances" && (
+              <div style={{ animation: "fadeIn 0.3s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}><I t="balance" s={24} /><div><h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#e8e4f5" }}>Consultar Saldos</h2><p style={{ margin: 0, fontSize: 13, color: "#7c73a8" }}>Nodo archive Moralis (JSON-RPC) · Bloque histórico</p></div></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+                  <div style={S.card}>
+                    <div style={S.cardH}><I t="calendar" s={15} /> Fecha / Bloque</div>
+                    <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                      <label style={S.label}>Fecha (UTC)<input type="date" value={bDate} onChange={e => setBDate(e.target.value)} style={S.input} /></label>
+                      <label style={S.label}>Bloque (opcional — tiene prioridad)<input type="number" placeholder="Ej: 52000000" value={bBlock} onChange={e => setBBlock(e.target.value)} style={S.input} /></label>
+                    </div>
+                  </div>
+                  <div style={S.card}>
+                    <div style={{ ...S.cardH, justifyContent: "space-between" }}><span style={{ display: "flex", alignItems: "center", gap: 6 }}><I t="wallet" s={15} /> Wallets</span><div style={{ display: "flex", gap: 6 }}><button onClick={() => setBWallets(wallets.map(w => w.id))} style={S.mini}>Todas</button><button onClick={() => setBWallets([])} style={S.mini}>Ninguna</button></div></div>
+                    <div style={{ marginTop: 12 }}><CheckList items={wallets} selected={bWallets} toggle={id => tog(id, bWallets, setBWallets)} /></div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+                  <div style={S.card}>
+                    <div style={{ ...S.cardH, justifyContent: "space-between" }}><span style={{ display: "flex", alignItems: "center", gap: 6 }}><I t="token" s={15} /> Tokens</span><div style={{ display: "flex", gap: 6 }}><button onClick={() => setBTokens(tokens.map(t => t.id))} style={S.mini}>Todos</button><button onClick={() => setBTokens([])} style={S.mini}>Ninguno</button></div></div>
+                    <div style={{ marginTop: 12 }}><CheckList items={tokens} selected={bTokens} toggle={id => tog(id, bTokens, setBTokens)} /></div>
+                  </div>
+                  <div style={{ ...S.card, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: 16 }}>
+                    <div style={{ fontSize: 12, color: "#6b5f8a", textAlign: "center" }}>{bWallets.length} wallets × {bTokens.length} tokens = {bWallets.length * bTokens.length} consultas<br />{bBlock ? "Bloque #" + bBlock : "Fecha: " + bDate}</div>
+                    <button onClick={handleDownloadBal} disabled={bLoading} style={{ ...S.btn, opacity: bLoading ? 0.7 : 1 }}>
+                      {bLoading ? <span style={{ display: "flex", alignItems: "center", gap: 8 }}><Spinner /> Consultando nodo...</span> : <span style={{ display: "flex", alignItems: "center", gap: 8 }}><I t="download" s={16} /> Descargar Saldos CSV</span>}
+                    </button>
+                    {bStats && <div style={{ textAlign: "center", marginTop: 8 }}><Badge c="green">✓ {bStats.total_queries} saldos · Bloque {bStats.block_number}</Badge></div>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ WALLETS ═══ */}
+            {tab === "wallets" && (
+              <div style={{ animation: "fadeIn 0.3s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}><I t="wallet" s={24} /><div><h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#e8e4f5" }}>Gestión de Wallets</h2><p style={{ margin: 0, fontSize: 13, color: "#7c73a8" }}>Perfil: {profiles.find(p => p.id === activeProfile)?.name}</p></div></div>
+                <div style={{ ...S.card, marginBottom: 20 }}>
+                  <div style={S.cardH}><I t="plus" s={15} /> Agregar Wallet / Contrato</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: 12, marginTop: 14, alignItems: "end" }}>
+                    <label style={S.label}>Nombre<input type="text" placeholder="Ej: Tesorería Q1" value={nw.name} onChange={e => setNw({ ...nw, name: e.target.value })} style={S.input} /></label>
+                    <label style={S.label}>Dirección (0x...)<input type="text" placeholder="0x742d35Cc..." value={nw.address} onChange={e => setNw({ ...nw, address: e.target.value })} style={{ ...S.input, fontFamily: "monospace", fontSize: 12 }} /></label>
+                    <button onClick={addWallet} style={S.btn}><span style={{ display: "flex", alignItems: "center", gap: 6 }}><I t="plus" s={15} /> Guardar</span></button>
+                  </div>
+                </div>
+                <div style={S.card}>
+                  <div style={{ ...S.cardH, marginBottom: 12 }}>{wallets.length} Wallets registradas</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {wallets.map(w => (
+                      <div key={w.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 10, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.08)" }}>
+                        {editW?.id === w.id ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
+                            <input value={editW.name} onChange={e => setEditW({ ...editW, name: e.target.value })} style={{ ...S.input, width: 200 }} />
+                            <input value={editW.address} onChange={e => setEditW({ ...editW, address: e.target.value })} style={{ ...S.input, flex: 1, fontFamily: "monospace", fontSize: 12 }} />
+                            <button onClick={saveEditW} style={S.iconBtn}><I t="check" s={16} /></button>
+                            <button onClick={() => setEditW(null)} style={S.iconBtn}><I t="x" s={16} /></button>
+                          </div>
+                        ) : (
+                          <React.Fragment>
+                            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                              <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(99,102,241,0.2))", display: "flex", alignItems: "center", justifyContent: "center" }}><I t="wallet" s={16} /></div>
+                              <div><div style={{ fontSize: 14, fontWeight: 600, color: "#c4b5fd" }}>{w.name}</div><div style={{ fontSize: 11, color: "#6b5f8a", fontFamily: "monospace" }}>{w.address}</div></div>
+                            </div>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => { navigator.clipboard?.writeText(w.address); notify("Copiado"); }} style={S.iconBtn}><I t="copy" s={15} /></button>
+                              <button onClick={() => setEditW({ ...w })} style={S.iconBtn}><I t="edit" s={15} /></button>
+                              <button onClick={() => removeWallet(w.id)} style={{ ...S.iconBtn, color: "#f87171" }}><I t="trash" s={15} /></button>
+                            </div>
+                          </React.Fragment>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ PROVIDERS ═══ */}
+            {tab === "providers" && (
+              <div style={{ animation: "fadeIn 0.3s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}><I t="profile" s={24} /><div><h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#e8e4f5" }}>Proveedores</h2><p style={{ margin: 0, fontSize: 13, color: "#7c73a8" }}>Estas wallets no se consideran propias para clasificar movimientos</p></div></div>
+                <div style={{ ...S.card, marginBottom: 20 }}>
+                  <div style={S.cardH}><I t="plus" s={15} /> Agregar Proveedor</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: 12, marginTop: 14, alignItems: "end" }}>
+                    <label style={S.label}>Proveedor<input type="text" placeholder="Ej: Proveedor OTC A" value={np.name} onChange={e => setNp({ ...np, name: e.target.value })} style={S.input} /></label>
+                    <label style={S.label}>Dirección Wallet (0x...)<input type="text" placeholder="0x..." value={np.address} onChange={e => setNp({ ...np, address: e.target.value })} style={{ ...S.input, fontFamily: "monospace", fontSize: 12 }} /></label>
+                    <button onClick={addProvider} style={S.btn}><span style={{ display: "flex", alignItems: "center", gap: 6 }}><I t="plus" s={15} /> Guardar</span></button>
+                  </div>
+                </div>
+                <div style={S.card}>
+                  <div style={{ ...S.cardH, marginBottom: 12 }}>{providers.length} Proveedores registrados</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {providers.map(p => (
+                      <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 10, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.08)" }}>
+                        {editP?.id === p.id ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
+                            <input value={editP.name} onChange={e => setEditP({ ...editP, name: e.target.value })} style={{ ...S.input, width: 220 }} />
+                            <input value={editP.address} onChange={e => setEditP({ ...editP, address: e.target.value })} style={{ ...S.input, flex: 1, fontFamily: "monospace", fontSize: 12 }} />
+                            <button onClick={saveEditP} style={S.iconBtn}><I t="check" s={16} /></button>
+                            <button onClick={() => setEditP(null)} style={S.iconBtn}><I t="x" s={16} /></button>
+                          </div>
+                        ) : (
+                          <React.Fragment>
+                            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                              <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, rgba(59,130,246,0.22), rgba(99,102,241,0.2))", display: "flex", alignItems: "center", justifyContent: "center" }}><I t="profile" s={16} /></div>
+                              <div><div style={{ fontSize: 14, fontWeight: 600, color: "#c4b5fd" }}>{p.name}</div><div style={{ fontSize: 11, color: "#6b5f8a", fontFamily: "monospace" }}>{p.address}</div></div>
+                            </div>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => { navigator.clipboard?.writeText(p.address); notify("Copiado"); }} style={S.iconBtn}><I t="copy" s={15} /></button>
+                              <button onClick={() => setEditP({ ...p })} style={S.iconBtn}><I t="edit" s={15} /></button>
+                              <button onClick={() => removeProvider(p.id)} style={{ ...S.iconBtn, color: "#f87171" }}><I t="trash" s={15} /></button>
+                            </div>
+                          </React.Fragment>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ TOKENS ═══ */}
+            {tab === "tokens" && (
+              <div style={{ animation: "fadeIn 0.3s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}><I t="token" s={24} /><div><h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#e8e4f5" }}>Gestión de Tokens</h2><p style={{ margin: 0, fontSize: 13, color: "#7c73a8" }}>Filtrado por contract address (anti-spam) · Para nativo usar "native"</p></div></div>
+                <div style={{ ...S.card, marginBottom: 20 }}>
+                  <div style={S.cardH}><I t="plus" s={15} /> Agregar Token</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: 12, marginTop: 14, alignItems: "end" }}>
+                    <label style={S.label}>Nombre / Symbol<input type="text" placeholder="Ej: USDC" value={nt.name} onChange={e => setNt({ ...nt, name: e.target.value })} style={S.input} /></label>
+                    <label style={S.label}>Token Address (0x... o "native")<input type="text" placeholder="0x3c499c542..." value={nt.address} onChange={e => setNt({ ...nt, address: e.target.value })} style={{ ...S.input, fontFamily: "monospace", fontSize: 12 }} /></label>
+                    <button onClick={addToken} style={S.btn}><span style={{ display: "flex", alignItems: "center", gap: 6 }}><I t="plus" s={15} /> Guardar</span></button>
+                  </div>
+                </div>
+                <div style={S.card}>
+                  <div style={{ ...S.cardH, marginBottom: 12 }}>{tokens.length} Tokens registrados</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {tokens.map(t => (
+                      <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 10, background: "rgba(139,92,246,0.04)", border: "1px solid rgba(139,92,246,0.08)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                          <div style={{ width: 36, height: 36, borderRadius: 10, background: t.address === "native" ? "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(168,85,247,0.3))" : "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.2))", display: "flex", alignItems: "center", justifyContent: "center" }}><I t="token" s={16} /></div>
+                          <div><div style={{ fontSize: 14, fontWeight: 600, color: "#c4b5fd" }}>{t.name}</div><div style={{ fontSize: 11, color: "#6b5f8a", fontFamily: "monospace" }}>{t.address === "native" ? "Token nativo (POL/MATIC)" : t.address}</div></div>
+                        </div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          {t.address === "native" && <Badge c="purple">Nativo</Badge>}
+                          <button onClick={() => removeToken(t.id)} style={{ ...S.iconBtn, color: "#f87171" }}><I t="trash" s={15} /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginTop: 16, padding: "14px 20px", borderRadius: 12, background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.12)", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <I t="shield" s={16} />
+                  <div style={{ fontSize: 12, color: "#c4a06a", lineHeight: 1.6 }}><strong>Anti-spam:</strong> Solo aparecen tokens registrados por su contract address.</div>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ TEMPLATES ═══ */}
+            {tab === "templates" && (
+              <div style={{ animation: "fadeIn 0.3s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}><I t="template" s={24} /><div><h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#e8e4f5" }}>Templates de Exportación</h2><p style={{ margin: 0, fontSize: 13, color: "#7c73a8" }}>Columnas para cada tipo de CSV</p></div></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+                  {templates.map(t => { const cols = Array.isArray(t.columns) ? t.columns : []; return (
+                    <div key={t.id} style={{ ...S.card, borderColor: "rgba(139,92,246,0.15)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(99,102,241,0.2))", display: "flex", alignItems: "center", justifyContent: "center" }}><I t="template" s={15} /></div>
+                        <div><div style={{ fontSize: 15, fontWeight: 700, color: "#c4b5fd" }}>{t.name}</div><div style={{ fontSize: 11, color: "#6b5f8a" }}>{cols.length} columnas</div></div>
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>{cols.map(col => <span key={col} style={{ padding: "3px 10px", borderRadius: 6, fontSize: 10, fontWeight: 500, background: "rgba(139,92,246,0.08)", color: "#a78bfa", border: "1px solid rgba(139,92,246,0.12)" }}>{col}</span>)}</div>
+                    </div>
+                  ); })}
+                </div>
+                <div style={S.card}>
+                  <div style={S.cardH}><I t="info" s={15} /> Todas las columnas disponibles</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+                    {["date","datetime_utc","hash","from","to","from_name","to_name","token_symbol","token_address","amount","signed_value","direction","decimals","value_usd","tx_type","mov_type","detalle","detalle_holded","block_number","gas_used","gas_price_gwei","nonce","method","log_index","source"].map(c => <span key={c} style={{ padding: "4px 12px", borderRadius: 6, fontSize: 11, background: "rgba(59,130,246,0.06)", color: "#7c9cc4", border: "1px solid rgba(59,130,246,0.1)" }}>{c}</span>)}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ PROFILES ═══ */}
+            {tab === "profiles" && (
+              <div style={{ animation: "fadeIn 0.3s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}><I t="profile" s={24} /><div><h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#e8e4f5" }}>Perfiles</h2><p style={{ margin: 0, fontSize: 13, color: "#7c73a8" }}>Cada perfil tiene sus propias wallets y tokens</p></div></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  {profiles.map(p => (
+                    <div key={p.id} style={{ ...S.card, borderColor: activeProfile === p.id ? "rgba(139,92,246,0.3)" : "rgba(139,92,246,0.08)", background: activeProfile === p.id ? "rgba(139,92,246,0.06)" : "rgba(15,12,41,0.6)" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ width: 40, height: 40, borderRadius: 12, background: activeProfile === p.id ? "linear-gradient(135deg, #8b5cf6, #6366f1)" : "rgba(139,92,246,0.1)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: activeProfile === p.id ? "0 0 16px rgba(139,92,246,0.3)" : "none" }}><I t="profile" s={18} /></div>
+                          <div><div style={{ fontSize: 16, fontWeight: 700, color: activeProfile === p.id ? "#c084fc" : "#a098c4" }}>{p.name}</div>{activeProfile === p.id && <Badge c="green">Activo</Badge>}</div>
+                        </div>
+                        <button onClick={() => setActiveProfile(p.id)} style={{ ...S.btn, background: activeProfile === p.id ? "rgba(139,92,246,0.15)" : "linear-gradient(135deg, #7c3aed, #6366f1)", fontSize: 12, padding: "6px 16px" }}>{activeProfile === p.id ? "Seleccionado" : "Activar"}</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </main>
+          <footer style={{ position: "relative", zIndex: 10, textAlign: "center", padding: "20px 32px", borderTop: "1px solid rgba(139,92,246,0.08)", color: "#4a4370", fontSize: 11 }}>Rentaltoken SL · Polygon Wallet Explorer · Moralis + Etherscan + Archive Node RPC · v2.0</footer>
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById("root"));
+  </script>
+</body>
+</html>
