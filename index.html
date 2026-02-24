@@ -246,6 +246,13 @@
             authedGet("get_templates"),
             authedGet("get_profiles"),
           ]);
+
+          const responses = [wRes, tRes, pvRes, tmRes, pRes];
+          const firstError = responses.find(r => !r || r.success !== true);
+          if (firstError) {
+            throw new Error(firstError?.error || "Error al cargar datos");
+          }
+
           if (wRes.success) setWallets(wRes.data);
           if (tRes.success) setTokens(tRes.data);
           if (pvRes.success) setProviders(pvRes.data);
