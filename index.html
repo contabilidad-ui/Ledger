@@ -155,6 +155,10 @@
 
     // ═══════════════════════════════════════════════════════════════════════
     function App() {
+      const [authToken, setAuthToken] = useState(() => sessionStorage.getItem("ledger_auth_token") || "");
+      const [authUser, setAuthUser] = useState(() => sessionStorage.getItem("ledger_auth_user") || "");
+      const [loginForm, setLoginForm] = useState({ username: "", password: "" });
+      const [loginLoading, setLoginLoading] = useState(false);
       const [tab, setTab] = useState("movements");
       const [wallets, setWallets] = useState([]);
       const [tokens, setTokens] = useState([]);
@@ -195,14 +199,52 @@
         setTimeout(() => setNote(null), 4000);
       }, []);
 
+      const authedGet = useCallback((action, params = {}) => {
+        return api.get(action, { ...params, token: authToken });
+      }, [authToken]);
+
+      const authedPost = useCallback((body = {}) => {
+        return api.post({ ...body, token: authToken });
+      }, [authToken]);
+
+      const logout = useCallback(async () => {
+        try { if (authToken) await api.post({ action: "logout", token: authToken }); } catch (_) {}
+        sessionStorage.removeItem("ledger_auth_token");
+        sessionStorage.removeItem("ledger_auth_user");
+        setAuthToken("");
+        setAuthUser("");
+        setWallets([]); setTokens([]); setProviders([]); setTemplates([]);
+        notify("Sesión cerrada");
+      }, [authToken, notify]);
+
+      const login = async () => {
+        if (!loginForm.username || !loginForm.password) return notify("Completa usuario y contraseña", "error");
+        setLoginLoading(true);
+        try {
+          const res = await api.post({ action: "login", username: loginForm.username.trim(), password: loginForm.password });
+          if (!res.success) return notify(res.error || "Credenciales inválidas", "error");
+          sessionStorage.setItem("ledger_auth_token", res.token);
+          sessionStorage.setItem("ledger_auth_user", res.username || loginForm.username.trim());
+          setAuthToken(res.token);
+          setAuthUser(res.username || loginForm.username.trim());
+          setLoginForm({ username: "", password: "" });
+          notify("Acceso concedido");
+        } catch (e) {
+          notify("Error de login: " + e.message, "error");
+        } finally {
+          setLoginLoading(false);
+        }
+      };
+
       const loadData = useCallback(async () => {
+        if (!authToken) return;
         try {
           const [wRes, tRes, pvRes, tmRes, pRes] = await Promise.all([
-            api.get("get_wallets", { profile_id: activeProfile }),
-            api.get("get_tokens", { profile_id: activeProfile }),
-            api.get("get_providers", { profile_id: activeProfile }),
-            api.get("get_templates"),
-            api.get("get_profiles"),
+            authedGet("get_wallets", { profile_id: activeProfile }),
+            authedGet("get_tokens", { profile_id: activeProfile }),
+            authedGet("get_providers", { profile_id: activeProfile }),
+            authedGet("get_templates"),
+            authedGet("get_profiles"),
           ]);
           if (wRes.success) setWallets(wRes.data);
           if (tRes.success) setTokens(tRes.data);
@@ -216,34 +258,15 @@
           notify("Conectado al backend correctamente", "success");
         } catch (e) {
           console.error("Backend error:", e);
+          if (String(e.message || "").indexOf("UNAUTHORIZED") >= 0) {
+            logout();
+            notify("Sesión expirada, inicia sesión nuevamente", "error");
+            return;
+          }
           setBackendOk(false);
-          setWallets([
-            { id: "w1", name: "Tesorería Principal", address: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD28" },
-            { id: "w2", name: "Proyecto Madrid Centro", address: "0x8Ba1f109551bD432803012645Ac136ddd64DBA72" },
-            { id: "w3", name: "Pagos Rendimientos Q1", address: "0xdD2FD4581271e230360230F9337D5c0430Bf44C0" },
-          ]);
-          setTokens([
-            { id: "t1", name: "RNT", address: "0x1234567890abcdef1234567890abcdef12345678" },
-            { id: "t2", name: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359" },
-            { id: "t3", name: "USDT", address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F" },
-            { id: "t4", name: "POL (Native)", address: "native" },
-          ]);
-          setProviders([
-            { id: "p1", name: "Proveedor Madrid", address: "0x0D8775F648430679A709E98d2b0Cb6250d2887EF" },
-          ]);
-          setTemplates([
-            { id: "tp1", name: "Completo", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","hash","from","from_name","to","to_name","token_symbol","token_address","amount","signed_value","direction","decimals","value_usd","tx_type","mov_type","detalle","detalle_holded","block_number","gas_used","gas_price_gwei","method","log_index","source"] },
-            { id: "tp2", name: "Rendimientos", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","to","to_name","token_symbol","token_address","amount","signed_value","mov_type","detalle","detalle_holded","value_usd"] },
-            { id: "tp3", name: "Inter-wallet", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","hash","from","from_name","to","to_name","token_symbol","amount","signed_value","mov_type","detalle","detalle_holded"] },
-            { id: "tp4", name: "Contabilidad", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","hash","from","from_name","to","to_name","token_symbol","token_address","signed_value","mov_type","detalle","detalle_holded","value_usd","block_number"] },
-            { id: "tp5", name: "Entradas/Salidas", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","mov_type","detalle","detalle_holded","token_symbol","signed_value","from","from_name","to","to_name","hash"] },
-            { id: "tp7", name: "Carga Holded", columns: ["date","detalle_holded","signed_value"] },
-            { id: "tp8", name: "Holded con Detalle", columns: ["date","detalle_holded","signed_value","mov_type","detalle"] },
-          ]);
-          setProfiles([{ id: "default", name: "Rentaltoken Principal" }]);
-          if (!mTemplate) setMTemplate("tp1");
+          notify("Error de backend: " + e.message, "error");
         }
-      }, [activeProfile]);
+      }, [activeProfile, authToken, authedGet, logout, notify, mTemplate]);
 
       useEffect(() => { loadData(); }, [loadData]);
 
@@ -252,14 +275,14 @@
         if (!/^0x[a-fA-F0-9]{40}$/.test(nw.address)) return notify("Dirección inválida (0x + 40 hex)", "error");
         if (wallets.find(w => w.address.toLowerCase() === nw.address.toLowerCase())) return notify("Wallet ya existe", "error");
         if (backendOk) {
-          const res = await api.post({ action: "add_wallet", name: nw.name, address: nw.address, profile_id: activeProfile });
+          const res = await authedPost({ action: "add_wallet", name: nw.name, address: nw.address, profile_id: activeProfile });
           if (res.success) { setWallets([...wallets, { id: res.id, name: nw.name, address: nw.address }]); setNw({ name: "", address: "" }); notify("Wallet guardada en Google Sheets"); }
           else notify("Error: " + res.error, "error");
         } else { setWallets([...wallets, { id: genId(), name: nw.name, address: nw.address }]); setNw({ name: "", address: "" }); notify("Wallet agregada (modo local)"); }
       };
 
       const removeWallet = async (id) => {
-        if (backendOk) await api.post({ action: "delete_wallet", id });
+        if (backendOk) await authedPost({ action: "delete_wallet", id });
         setWallets(wallets.filter(w => w.id !== id));
         setMWallets(mWallets.filter(x => x !== id));
         setBWallets(bWallets.filter(x => x !== id));
@@ -268,7 +291,7 @@
 
       const saveEditW = async () => {
         if (!editW) return;
-        if (backendOk) await api.post({ action: "update_wallet", id: editW.id, name: editW.name, address: editW.address });
+        if (backendOk) await authedPost({ action: "update_wallet", id: editW.id, name: editW.name, address: editW.address });
         setWallets(wallets.map(w => w.id === editW.id ? editW : w));
         setEditW(null);
         notify("Wallet actualizada");
@@ -279,13 +302,13 @@
         if (nt.address !== "native" && !/^0x[a-fA-F0-9]{40}$/.test(nt.address)) return notify("Token address inválido", "error");
         if (tokens.find(t => t.address.toLowerCase() === nt.address.toLowerCase())) return notify("Token ya existe", "error");
         if (backendOk) {
-          const res = await api.post({ action: "add_token", name: nt.name, address: nt.address, profile_id: activeProfile });
+          const res = await authedPost({ action: "add_token", name: nt.name, address: nt.address, profile_id: activeProfile });
           if (res.success) { setTokens([...tokens, { id: res.id, name: nt.name, address: nt.address }]); setNt({ name: "", address: "" }); notify("Token guardado en Google Sheets"); }
         } else { setTokens([...tokens, { id: genId(), name: nt.name, address: nt.address }]); setNt({ name: "", address: "" }); notify("Token agregado (modo local)"); }
       };
 
       const removeToken = async (id) => {
-        if (backendOk) await api.post({ action: "delete_token", id });
+        if (backendOk) await authedPost({ action: "delete_token", id });
         setTokens(tokens.filter(t => t.id !== id));
         setMTokens(mTokens.filter(x => x !== id));
         setBTokens(bTokens.filter(x => x !== id));
@@ -297,7 +320,7 @@
         if (!/^0x[a-fA-F0-9]{40}$/.test(np.address)) return notify("Dirección inválida (0x + 40 hex)", "error");
         if (providers.find(p => p.address.toLowerCase() === np.address.toLowerCase())) return notify("Proveedor ya existe", "error");
         if (backendOk) {
-          const res = await api.post({ action: "add_provider", name: np.name, address: np.address, profile_id: activeProfile });
+          const res = await authedPost({ action: "add_provider", name: np.name, address: np.address, profile_id: activeProfile });
           if (res.success) {
             setProviders([...providers, { id: res.id, name: np.name, address: np.address }]);
             setNp({ name: "", address: "" });
@@ -311,14 +334,14 @@
       };
 
       const removeProvider = async (id) => {
-        if (backendOk) await api.post({ action: "delete_provider", id });
+        if (backendOk) await authedPost({ action: "delete_provider", id });
         setProviders(providers.filter(p => p.id !== id));
         notify("Proveedor eliminado");
       };
 
       const saveEditP = async () => {
         if (!editP) return;
-        if (backendOk) await api.post({ action: "update_provider", id: editP.id, name: editP.name, address: editP.address });
+        if (backendOk) await authedPost({ action: "update_provider", id: editP.id, name: editP.name, address: editP.address });
         setProviders(providers.map(p => p.id === editP.id ? editP : p));
         setEditP(null);
         notify("Proveedor actualizado");
@@ -344,7 +367,7 @@
                 return prev;
               });
             }, 8000);
-            const res = await api.post({ action: "download_movements", wallets: selW, tokens: selT, profile_id: activeProfile, from_date: mFrom, to_date: mTo, exclude_zero: mExcZero, search_type: mSearchType, template_columns: cols });
+            const res = await authedPost({ action: "download_movements", wallets: selW, tokens: selT, profile_id: activeProfile, from_date: mFrom, to_date: mTo, exclude_zero: mExcZero, search_type: mSearchType, template_columns: cols });
             clearInterval(progressTimer);
             if (res.success) { downloadCSV(res.csv, res.filename); setMStats(res.stats); setMProgress(""); notify("✅ " + res.stats.total_filtered + " movimientos descargados (Moralis: " + res.stats.moralis_count + " + Etherscan: +" + res.stats.etherscan_added + ")"); }
             else { notify("Error: " + res.error, "error"); setMProgress(""); }
@@ -366,7 +389,7 @@
         const selT = tokens.filter(t => bTokens.includes(t.id)).map(t => ({ name: t.name, address: t.address }));
         if (backendOk) {
           try {
-            const res = await api.post({ action: "download_balances", wallets: selW, tokens: selT, date: bDate, block: bBlock || null, template_columns: ["wallet_name","wallet_address","token_symbol","token_address","balance","decimals","block_number","datetime_utc"] });
+            const res = await authedPost({ action: "download_balances", wallets: selW, tokens: selT, date: bDate, block: bBlock || null, template_columns: ["wallet_name","wallet_address","token_symbol","token_address","balance","decimals","block_number","datetime_utc"] });
             if (res.success) { downloadCSV(res.csv, res.filename); setBStats(res.stats); notify("✅ Saldos de " + res.stats.total_queries + " combinaciones descargados"); }
             else notify("Error: " + res.error, "error");
           } catch (e) { notify("Error: " + e.message, "error"); }
@@ -395,6 +418,29 @@
         { id: "external_out", label: "Salida Externa" },
       ];
 
+      if (!authToken) {
+        return (
+          <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "radial-gradient(900px 360px at 85% -10%, rgba(41,75,149,0.24), transparent 60%), linear-gradient(155deg, var(--bg-900) 0%, var(--bg-800) 38%, var(--bg-700) 72%, #09080f 100%)", padding: 20 }}>
+            <div style={{ width: "100%", maxWidth: 460, ...S.card }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                <img src="ReentalHWhite.png" alt="Reental" style={{ height: 32, width: "auto", objectFit: "contain" }} />
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#d0bbff" }}>Ledger Suite</div>
+                  <div style={{ fontSize: 12, color: "#8a83b5" }}>Acceso restringido</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <label style={S.label}>Usuario<input type="text" value={loginForm.username} onChange={e => setLoginForm({ ...loginForm, username: e.target.value })} style={S.input} placeholder="usuario" /></label>
+                <label style={S.label}>Contraseña<input type="password" value={loginForm.password} onChange={e => setLoginForm({ ...loginForm, password: e.target.value })} style={S.input} placeholder="••••••••" onKeyDown={e => { if (e.key === "Enter") login(); }} /></label>
+                <button onClick={login} disabled={loginLoading} style={{ ...S.btn, width: "100%", opacity: loginLoading ? 0.7 : 1 }}>
+                  {loginLoading ? <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><Spinner /> Validando...</span> : "Entrar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div style={{ minHeight: "100vh", background: "radial-gradient(1200px 500px at 85% -10%, rgba(41,75,149,0.24), transparent 60%), radial-gradient(900px 450px at -10% 120%, rgba(139,92,246,0.2), transparent 65%), linear-gradient(155deg, var(--bg-900) 0%, var(--bg-800) 38%, var(--bg-700) 72%, #09080f 100%)", color: "var(--text-100)", fontFamily: "'Manrope', 'Segoe UI', system-ui, sans-serif", position: "relative" }}>
           <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0 }}>
@@ -414,10 +460,12 @@
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <Badge c="blue">{authUser}</Badge>
                 {backendOk === true && <Badge c="green">● Backend OK</Badge>}
                 {backendOk === false && <Badge c="amber">⚠ Modo Demo</Badge>}
                 <Badge c="green">● Polygon Mainnet</Badge>
                 <Badge c="purple">{wallets.length} wallets</Badge>
+                <button onClick={logout} style={{ ...S.mini, padding: "5px 12px" }}>Cerrar sesión</button>
               </div>
             </div>
           </header>
