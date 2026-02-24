@@ -232,11 +232,11 @@
             { id: "p1", name: "Proveedor Madrid", address: "0x0D8775F648430679A709E98d2b0Cb6250d2887EF" },
           ]);
           setTemplates([
-            { id: "tp1", name: "Completo", columns: ["date","datetime_utc","hash","from","from_name","to","to_name","token_symbol","token_address","amount","signed_value","direction","decimals","value_usd","tx_type","mov_type","detalle","detalle_holded","block_number","gas_used","gas_price_gwei","method","log_index","source"] },
-            { id: "tp2", name: "Rendimientos", columns: ["date","datetime_utc","to","to_name","token_symbol","token_address","amount","signed_value","mov_type","detalle","detalle_holded","value_usd"] },
-            { id: "tp3", name: "Inter-wallet", columns: ["date","datetime_utc","hash","from","from_name","to","to_name","token_symbol","amount","signed_value","mov_type","detalle","detalle_holded"] },
-            { id: "tp4", name: "Contabilidad", columns: ["date","datetime_utc","hash","from","from_name","to","to_name","token_symbol","token_address","signed_value","mov_type","detalle","detalle_holded","value_usd","block_number"] },
-            { id: "tp5", name: "Entradas/Salidas", columns: ["date","datetime_utc","mov_type","detalle","detalle_holded","token_symbol","signed_value","from","from_name","to","to_name","hash"] },
+            { id: "tp1", name: "Completo", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","hash","from","from_name","to","to_name","token_symbol","token_address","amount","signed_value","direction","decimals","value_usd","tx_type","mov_type","detalle","detalle_holded","block_number","gas_used","gas_price_gwei","method","log_index","source"] },
+            { id: "tp2", name: "Rendimientos", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","to","to_name","token_symbol","token_address","amount","signed_value","mov_type","detalle","detalle_holded","value_usd"] },
+            { id: "tp3", name: "Inter-wallet", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","hash","from","from_name","to","to_name","token_symbol","amount","signed_value","mov_type","detalle","detalle_holded"] },
+            { id: "tp4", name: "Contabilidad", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","hash","from","from_name","to","to_name","token_symbol","token_address","signed_value","mov_type","detalle","detalle_holded","value_usd","block_number"] },
+            { id: "tp5", name: "Entradas/Salidas", columns: ["date","datetime_utc","wallet_monitored","name_wallet_monitored","mov_type","detalle","detalle_holded","token_symbol","signed_value","from","from_name","to","to_name","hash"] },
             { id: "tp7", name: "Carga Holded", columns: ["date","detalle_holded","signed_value"] },
             { id: "tp8", name: "Holded con Detalle", columns: ["date","detalle_holded","signed_value","mov_type","detalle"] },
           ]);
@@ -333,7 +333,7 @@
         const selW = wallets.filter(w => mWallets.includes(w.id)).map(w => ({ name: w.name, address: w.address }));
         const selT = tokens.filter(t => mTokens.includes(t.id)).map(t => ({ name: t.name, address: t.address }));
         const tmpl = templates.find(t => t.id === mTemplate);
-        const cols = tmpl ? (Array.isArray(tmpl.columns) ? tmpl.columns : JSON.parse(tmpl.columns)) : ["datetime_utc","hash","from","to","token_symbol","amount","tx_type","block_number"];
+        const cols = tmpl ? (Array.isArray(tmpl.columns) ? tmpl.columns : JSON.parse(tmpl.columns)) : ["date","datetime_utc","wallet_monitored","name_wallet_monitored","hash","from","to","token_symbol","amount","signed_value","mov_type","block_number"];
         if (backendOk) {
           try {
             setMProgress("Fase 1: Extrayendo desde Moralis...");
@@ -526,7 +526,7 @@
                     <div style={{ padding: "10px 14px", background: "rgba(139,92,246,0.06)", borderRadius: 10, border: "1px solid rgba(139,92,246,0.08)" }}>
                       <div style={{ fontSize: 11, color: "#7c73a8", fontWeight: 600, marginBottom: 6 }}>Leyenda mov_type en el CSV:</div>
                       <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                        {[{ label: "Entrada Externa", color: "#6ee7b7", desc: "from externo → to nuestro · signed_value positivo" }, { label: "Salida Externa", color: "#fca5a5", desc: "from nuestro → to externo · signed_value negativo" }, { label: "Interwallet", color: "#93c5fd", desc: "from nuestro → to nuestro · signed_value sin signo" }].map((mt, i) => (
+                        {[{ label: "Entrada Externa", color: "#6ee7b7", desc: "from externo → to nuestro · signed_value positivo" }, { label: "Salida Externa", color: "#fca5a5", desc: "from nuestro → to externo · signed_value negativo" }, { label: "Interwallet", color: "#93c5fd", desc: "Se conserva hash repetido por wallet monitoreada · signed_value según IN/OUT" }].map((mt, i) => (
                           <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: mt.color, display: "inline-block", flexShrink: 0 }} /><span style={{ fontSize: 11, color: mt.color, fontWeight: 600 }}>{mt.label}</span><span style={{ fontSize: 10, color: "#6b5f8a" }}>— {mt.desc}</span></div>
                         ))}
                       </div>
@@ -541,8 +541,9 @@
                   <I t="info" s={16} />
                   <div style={{ fontSize: 12, color: "#b0a0d4", lineHeight: 1.7 }}>
                     <strong>Campos especiales:</strong><br />
-                    <strong style={{ color: "#c084fc" }}>signed_value</strong> — Positivo para entradas, negativo (−) para salidas, sin signo para interwallet.<br />
+                    <strong style={{ color: "#c084fc" }}>signed_value</strong> — Positivo para IN y negativo (−) para OUT, también en interwallet.<br />
                     <strong style={{ color: "#c084fc" }}>direction</strong> — Solo IN (entrada) o OUT (salida).<br />
+                    <strong style={{ color: "#c084fc" }}>wallet_monitored / name_wallet_monitored</strong> — Wallet específica que originó la fila, útil cuando hay hashes repetidos.<br />
                     <strong style={{ color: "#c084fc" }}>mov_type</strong> — <em>Entrada Externa</em>, <em>Salida Externa</em>, <em>Interwallet</em>. Movimientos sin wallets del perfil se descartan.
                   </div>
                 </div>
@@ -724,7 +725,7 @@
                 <div style={S.card}>
                   <div style={S.cardH}><I t="info" s={15} /> Todas las columnas disponibles</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
-                    {["date","datetime_utc","hash","from","to","from_name","to_name","token_symbol","token_address","amount","signed_value","direction","decimals","value_usd","tx_type","mov_type","detalle","detalle_holded","block_number","gas_used","gas_price_gwei","nonce","method","log_index","source"].map(c => <span key={c} style={{ padding: "4px 12px", borderRadius: 6, fontSize: 11, background: "rgba(59,130,246,0.06)", color: "#7c9cc4", border: "1px solid rgba(59,130,246,0.1)" }}>{c}</span>)}
+                    {["date","datetime_utc","wallet_monitored","name_wallet_monitored","hash","from","to","from_name","to_name","token_symbol","token_address","amount","signed_value","direction","decimals","value_usd","tx_type","mov_type","detalle","detalle_holded","block_number","gas_used","gas_price_gwei","nonce","method","log_index","source"].map(c => <span key={c} style={{ padding: "4px 12px", borderRadius: 6, fontSize: 11, background: "rgba(59,130,246,0.06)", color: "#7c9cc4", border: "1px solid rgba(59,130,246,0.1)" }}>{c}</span>)}
                   </div>
                 </div>
               </div>
