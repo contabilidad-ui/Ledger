@@ -396,7 +396,7 @@
         const selT = tokens.filter(t => bTokens.includes(t.id)).map(t => ({ name: t.name, address: t.address }));
         if (backendOk) {
           try {
-            const res = await authedPost({ action: "download_balances", wallets: selW, tokens: selT, date: bDate, block: bBlock || null, template_columns: ["wallet_name","wallet_address","token_symbol","token_address","balance","decimals","block_number","datetime_utc"] });
+            const res = await authedPost({ action: "download_balances", wallets: selW, tokens: selT, date: bDate, block: bBlock || null, template_columns: ["wallet_name","wallet_address","token_symbol","token_address","balance","price_usd","value_usd_historical","price_source","price_timestamp_utc","decimals","block_number","datetime_utc"] });
             if (res.success) { downloadCSV(res.csv, res.filename); setBStats(res.stats); notify("✅ Saldos de " + res.stats.total_queries + " combinaciones descargados"); }
             else notify("Error: " + res.error, "error");
           } catch (e) { notify("Error: " + e.message, "error"); }
